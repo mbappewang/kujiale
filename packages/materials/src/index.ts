@@ -15,9 +15,17 @@ const TIER_RESOLUTION: Record<TextureQualityTier, number> = {
   ultra: 512,
 };
 
+interface ScannedPackTextures {
+  diff: THREE.Texture;
+  nor: THREE.Texture;
+  arm: THREE.Texture;
+}
+
 export class MaterialSystem {
   private readonly specs = new Map<string, PbrMaterialSpec>();
   private readonly textureCache = new Map<string, SynthesizedTextureSet>();
+  private readonly scannedPackCache = new Map<string, Promise<ScannedPackTextures | null>>();
+  private readonly clonedScannedTextures: THREE.Texture[] = [];
   private readonly materialCache = new Map<string, THREE.Material>();
   private qualityTier: TextureQualityTier;
 
@@ -86,7 +94,7 @@ export class MaterialSystem {
     this.qualityTier = tier;
   }
 
-  private getOrCreateTextures(spec: PbrMaterialSpec): SynthesizedTextureSet {
+  private getOrCreateProceduralTextures(spec: PbrMaterialSpec): SynthesizedTextureSet {
     const texKey = `${spec.id}::${this.qualityTier}::${spec.baseColorHex}`;
     const existing = this.textureCache.get(texKey);
     if (existing) return existing;
@@ -96,9 +104,51 @@ export class MaterialSystem {
     return created;
   }
 
+  private loadScannedPack(packId: string): Promise<ScannedPackTextures | null> {
+    const existing = this.scannedPackCache.get(packId);
+    if (existing) return existing;
+
+    // Only attempt browser image loading when DOM Image is available
+    if (typeof window === 'undefined' || typeof Image === 'undefined') {
+      const none = Promise.resolve(null);
+      this.scannedPackCache.set(packId, none);
+      return none;
+    }
+
+    const loader = new THREE.TextureLoader();
+    const loadOne = (url: string, srgb: boolean): Promise<THREE.Texture> =>
+      new Promise((resolve, reject) => {
+        loader.load(
+          url,
+          (tex) => {
+            tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            tex.anisotropy = this.qualityTier === 'low' ? 2 : 8;
+            tex.channel = 0;
+            tex.needsUpdate = true;
+            resolve(tex);
+          },
+          undefined,
+          (err) => reject(err),
+        );
+      });
+
+    const promise = Promise.all([
+      loadOne(`/textures/${packId}/diff.jpg`, true),
+      loadOne(`/textures/${packId}/nor_gl.jpg`, false),
+      loadOne(`/textures/${packId}/arm.jpg`, false),
+    ])
+      .then(([diff, nor, arm]) => ({ diff, nor, arm }))
+      .catch(() => null);
+
+    this.scannedPackCache.set(packId, promise);
+    return promise;
+  }
+
   /**
-   * Returns a cached, physically-scaled PBR Material instance.
-   * Geometries using world-space metre UVs (1 UV = 1m) will automatically repeat every `tileSizeMeters`.
+   * Returns a cached, physically-scaled MeshPhysicalMaterial instance with Clearcoat, Sheen,
+   * and progressive upgrade to real CC0 1K Photogrammetry Scanned PBR textures.
    */
   public getMaterial(
     materialId: string,
@@ -119,11 +169,13 @@ export class MaterialSystem {
         roughness: spec.roughness,
         metalness: spec.metalness,
         transparent: true,
-        opacity: spec.opacity ?? 0.35,
-        transmission: this.qualityTier === 'low' ? 0 : (spec.transmission ?? 0.78),
-        ior: 1.5,
-        reflectivity: 0.9,
-        envMapIntensity: spec.envMapIntensity ?? 1.5,
+        opacity: spec.opacity ?? 0.34,
+        transmission: this.qualityTier === 'low' ? 0 : (spec.transmission ?? 0.85),
+        ior: 1.52,
+        reflectivity: 0.95,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.04,
+        envMapIntensity: spec.envMapIntensity ?? 2.0,
         side: THREE.DoubleSide,
         depthWrite: false,
       });
@@ -131,10 +183,10 @@ export class MaterialSystem {
       return glassMat;
     }
 
-    const baseTextures = this.getOrCreateTextures(spec);
+    const baseTextures = this.getOrCreateProceduralTextures(spec);
     const invTile = worldUv ? 1 / Math.max(0.1, spec.tileSizeMeters) : 1;
 
-    const cloneScaledTex = (src: THREE.DataTexture): THREE.DataTexture => {
+    const cloneScaledDataTex = (src: THREE.DataTexture): THREE.DataTexture => {
       if (Math.abs(invTile - 1) < 1e-4) return src;
       const cloned = src.clone();
       cloned.repeat.set(invTile, invTile);
@@ -142,20 +194,63 @@ export class MaterialSystem {
       return cloned;
     };
 
-    const mat = new THREE.MeshStandardMaterial({
+    const mat = new THREE.MeshPhysicalMaterial({
       name: spec.id,
       color: new THREE.Color(0xffffff),
-      map: cloneScaledTex(baseTextures.albedoMap),
-      normalMap: cloneScaledTex(baseTextures.normalMap),
+      map: cloneScaledDataTex(baseTextures.albedoMap),
+      normalMap: cloneScaledDataTex(baseTextures.normalMap),
       normalScale: new THREE.Vector2(spec.bumpStrength, spec.bumpStrength),
-      roughnessMap: cloneScaledTex(baseTextures.roughnessMap),
-      roughness: 1.0, // Driven accurately by roughnessMap bytes
+      roughnessMap: cloneScaledDataTex(baseTextures.roughnessMap),
+      roughness: 1.0,
       metalness: spec.metalness,
-      aoMap: cloneScaledTex(baseTextures.aoMap),
-      aoMapIntensity: 0.75,
-      envMapIntensity: spec.envMapIntensity ?? 0.85,
+      aoMap: cloneScaledDataTex(baseTextures.aoMap),
+      aoMapIntensity: 0.85,
+      clearcoat: this.qualityTier === 'low' ? 0 : (spec.clearcoat ?? 0),
+      clearcoatRoughness: spec.clearcoatRoughness ?? 0.3,
+      sheen: this.qualityTier === 'low' ? 0 : (spec.sheen ?? 0),
+      sheenRoughness: spec.sheenRoughness ?? 0.55,
+      sheenColor: spec.sheenColorHex ? new THREE.Color(spec.sheenColorHex) : new THREE.Color(0xffffff),
+      envMapIntensity: spec.envMapIntensity ?? 1.0,
       side: doubleSide ? THREE.DoubleSide : THREE.FrontSide,
     });
+
+    // Seamlessly upgrade to scanned 1K photogrammetry PBR maps in browser runtime
+    if (spec.texturePackId) {
+      this.loadScannedPack(spec.texturePackId).then((scanned) => {
+        if (!scanned || !this.materialCache.has(cacheKey)) return;
+
+        const cloneScanned = (tex: THREE.Texture): THREE.Texture => {
+          const c = tex.clone();
+          c.repeat.set(invTile, invTile);
+          c.wrapS = THREE.RepeatWrapping;
+          c.wrapT = THREE.RepeatWrapping;
+          c.colorSpace = tex.colorSpace;
+          c.anisotropy = tex.anisotropy;
+          c.channel = 0;
+          c.needsUpdate = true;
+          this.clonedScannedTextures.push(c);
+          return c;
+        };
+
+        const diffClone = cloneScanned(scanned.diff);
+        const norClone = cloneScanned(scanned.nor);
+        const armClone = cloneScanned(scanned.arm);
+
+        const tint = new THREE.Color(spec.tintHex ?? '#ffffff');
+        if (spec.albedoGain && spec.albedoGain !== 1) {
+          tint.multiplyScalar(spec.albedoGain);
+        }
+        mat.color = tint;
+        mat.map = diffClone;
+        mat.normalMap = norClone;
+        // Poly Haven ARM packs: R = Ambient Occlusion, G = Roughness, B = Metalness
+        mat.aoMap = armClone;
+        mat.roughnessMap = armClone;
+        mat.roughness = Math.min(1.0, spec.roughness * 1.45 + 0.25);
+        mat.aoMapIntensity = 0.95;
+        mat.needsUpdate = true;
+      });
+    }
 
     this.materialCache.set(cacheKey, mat);
     return mat;
@@ -195,6 +290,10 @@ export class MaterialSystem {
       set.roughnessMap.dispose();
       set.aoMap.dispose();
     }
+    for (const tex of this.clonedScannedTextures) {
+      tex.dispose();
+    }
+    this.clonedScannedTextures.length = 0;
     this.materialCache.clear();
     this.textureCache.clear();
   }

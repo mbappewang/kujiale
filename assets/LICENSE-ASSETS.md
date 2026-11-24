@@ -1,9 +1,41 @@
 # Asset Commercial Licensing & Provenance Manifest
 
-All 3D models, PBR material textures, environment maps, and sample floor plans in this repository are **100% first-party procedurally authored** for this platform:
+All 3D furniture/flora `.glb` models, scanned 1K PBR textures (`diff`, `nor_gl`, `arm`), and 32-bit `.hdr` environment skies in `apps/web/public/{models,textures,hdri}` are sourced from **Poly Haven (https://polyhaven.com/license)** under **CC0 1.0 Universal Public Domain Dedication** (100% free for commercial and non-commercial use without restriction), alongside first-party procedurally authored blueprints (`sydney-coastal-4bed.png`).
 
-- `models/coastal-coffee-table.glb`: Procedurally generated glTF 2.0 binary asset (CC0 / First-Party Owned).
-- `floorplans/sydney-coastal-4bed.png`: Procedurally authored Australian residential sample blueprint (13.6 m × 13.6 m, CC0 / First-Party Owned).
-- PBR Albedo, Normal, Roughness, and Ambient Occlusion maps: Generated deterministically at runtime by `@kujiale/materials`.
+## Bundled CC0 3D Models (15)
+- `sofa_03.glb` (Poly Haven CC0)
+- `Sofa_01.glb` (Poly Haven CC0)
+- `mid_century_lounge_chair.glb` (Poly Haven CC0)
+- `modern_arm_chair_01.glb` (Poly Haven CC0)
+- `modern_coffee_table_01.glb` (Poly Haven CC0)
+- `side_table_01.glb` (Poly Haven CC0)
+- `modern_wooden_cabinet.glb` (Poly Haven CC0)
+- `dining_table.glb` (Poly Haven CC0)
+- `gallinera_table.glb` (Poly Haven CC0)
+- `dining_chair_02.glb` (Poly Haven CC0)
+- `bar_chair_round_01.glb` (Poly Haven CC0)
+- `outdoor_table_chair_set_01.glb` (Poly Haven CC0)
+- `potted_plant_02.glb` (Poly Haven CC0)
+- `shrub_03.glb` (Poly Haven CC0)
+- `fern_02.glb` (Poly Haven CC0)
 
-Zero unverified third-party URLs or restricted commercial models are referenced.
+## Bundled CC0 Scanned PBR Texture Sets (15)
+- `laminate_floor_02` (`diff.jpg`, `nor_gl.jpg`, `arm.jpg` — Poly Haven CC0)
+- `oak_wood_planks` (`diff.jpg`, `nor_gl.jpg`, `arm.jpg` — Poly Haven CC0)
+- `wood_floor_deck` (`diff.jpg`, `nor_gl.jpg`, `arm.jpg` — Poly Haven CC0)
+- `interior_tiles` (`diff.jpg`, `nor_gl.jpg`, `arm.jpg` — Poly Haven CC0)
+- `terrazzo_tiles` (`diff.jpg`, `nor_gl.jpg`, `arm.jpg` — Poly Haven CC0)
+- `marble_01` (`diff.jpg`, `nor_gl.jpg`, `arm.jpg` — Poly Haven CC0)
+- `brushed_concrete` (`diff.jpg`, `nor_gl.jpg`, `arm.jpg` — Poly Haven CC0)
+- `brick_wall_001` (`diff.jpg`, `nor_gl.jpg`, `arm.jpg` — Poly Haven CC0)
+- `brick_wall_13` (`diff.jpg`, `nor_gl.jpg`, `arm.jpg` — Poly Haven CC0)
+- `painted_plaster_wall` (`diff.jpg`, `nor_gl.jpg`, `arm.jpg` — Poly Haven CC0)
+- `rough_linen` (`diff.jpg`, `nor_gl.jpg`, `arm.jpg` — Poly Haven CC0)
+- `brown_leather` (`diff.jpg`, `nor_gl.jpg`, `arm.jpg` — Poly Haven CC0)
+- `leafy_grass` (`diff.jpg`, `nor_gl.jpg`, `arm.jpg` — Poly Haven CC0)
+- `corrugated_iron` (`diff.jpg`, `nor_gl.jpg`, `arm.jpg` — Poly Haven CC0)
+- `clay_roof_tiles` (`diff.jpg`, `nor_gl.jpg`, `arm.jpg` — Poly Haven CC0)
+
+## Bundled CC0 32-bit Equirectangular HDRIs
+- `sunsky_day.hdr` (`kloofendal_48d_partly_cloudy_puresky` — Poly Haven CC0)
+- `sunsky_evening.hdr` (`belfast_sunset_puresky` — Poly Haven CC0)

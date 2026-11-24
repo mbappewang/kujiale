@@ -1,11 +1,129 @@
-import { distance2D, pointInPolygon, polygonBounds, wallDirection, type Point2D } from '@kujiale/shared';
-import type { LandscapeElementData, RoomData, SceneData } from '@kujiale/scene-schema';
+import type { AssetManager } from '@kujiale/asset-manager';
 import type { MaterialSystem } from '@kujiale/materials';
+import type { LandscapeElementData, SceneData } from '@kujiale/scene-schema';
+import { distance2D, polygonBounds, wallDirection, type Point2D } from '@kujiale/shared';
 import * as THREE from 'three';
 
 export interface LandscapeQualityOptions {
-  vegetationDensityMultiplier: number; // 0.25 (Low) .. 1.0 (High/Ultra)
+  vegetationDensityMultiplier: number;
   enableLod: boolean;
+}
+
+let cachedEucalyptusLeafTex: THREE.DataTexture | null = null;
+let cachedWaterNormalTex: THREE.DataTexture | null = null;
+
+/**
+ * Synthesizes an alpha-tested RGBA botanical sprig of lanceolate Australian Eucalyptus leaves.
+ */
+function getEucalyptusLeafClusterTexture(): THREE.DataTexture {
+  if (cachedEucalyptusLeafTex) return cachedEucalyptusLeafTex;
+  const size = 256;
+  const bytes = new Uint8Array(size * size * 4);
+
+  // Branch stems + 18 angled lanceolate leaves around central twig
+  const leaves: Array<{ cx: number; cy: number; angle: number; len: number; wid: number; tone: number }> = [];
+  for (let i = 0; i < 18; i++) {
+    const t = 0.14 + (i / 18) * 0.78;
+    const side = i % 2 === 0 ? 1 : -1;
+    const baseAngle = side * (0.45 + ((i * 7) % 5) * 0.12) - 0.15;
+    const cx = 0.5 + Math.sin(t * 2.5) * 0.04 + side * 0.14;
+    const cy = t;
+    leaves.push({
+      cx,
+      cy,
+      angle: baseAngle,
+      len: 0.19 + ((i * 3) % 4) * 0.025,
+      wid: 0.038 + ((i * 5) % 3) * 0.007,
+      tone: ((i * 11) % 7) / 7,
+    });
+  }
+
+  for (let py = 0; py < size; py++) {
+    const v = py / size;
+    for (let px = 0; px < size; px++) {
+      const u = px / size;
+      const p4 = (py * size + px) * 4;
+
+      // Central woody twig
+      const stemX = 0.5 + Math.sin(v * 2.5) * 0.04;
+      if (v > 0.05 && v < 0.92 && Math.abs(u - stemX) < 0.011 * (1.2 - v * 0.6)) {
+        bytes[p4] = 112;
+        bytes[p4 + 1] = 98;
+        bytes[p4 + 2] = 82;
+        bytes[p4 + 3] = 255;
+        continue;
+      }
+
+      let hitLeaf = false;
+      for (const lf of leaves) {
+        const dx = u - lf.cx;
+        const dy = v - lf.cy;
+        const cos = Math.cos(-lf.angle);
+        const sin = Math.sin(-lf.angle);
+        const lx = dx * cos - dy * sin;
+        const ly = dx * sin + dy * cos;
+        // Lanceolate leaf equation: tapered at both petiole and tip
+        const normAlong = ly / lf.len + 0.5;
+        if (normAlong >= 0 && normAlong <= 1) {
+          const envelope = Math.sin(Math.pow(normAlong, 0.82) * Math.PI) * lf.wid;
+          if (Math.abs(lx) <= envelope) {
+            const midrib = Math.abs(lx) < 0.004 ? 14 : 0;
+            const shade = 0.82 + lf.tone * 0.28 + normAlong * 0.12;
+            bytes[p4] = Math.min(255, Math.round(82 * shade + midrib));
+            bytes[p4 + 1] = Math.min(255, Math.round(114 * shade + midrib));
+            bytes[p4 + 2] = Math.min(255, Math.round(78 * shade));
+            bytes[p4 + 3] = 255;
+            hitLeaf = true;
+            break;
+          }
+        }
+      }
+
+      if (!hitLeaf) {
+        bytes[p4] = 78;
+        bytes[p4 + 1] = 108;
+        bytes[p4 + 2] = 74;
+        bytes[p4 + 3] = 0;
+      }
+    }
+  }
+
+  const tex = new THREE.DataTexture(bytes, size, size, THREE.RGBAFormat);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.generateMipmaps = true;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  cachedEucalyptusLeafTex = tex;
+  return tex;
+}
+
+function getPoolWaterNormalTexture(): THREE.DataTexture {
+  if (cachedWaterNormalTex) return cachedWaterNormalTex;
+  const size = 128;
+  const bytes = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    const v = (y / size) * Math.PI * 2;
+    for (let x = 0; x < size; x++) {
+      const u = (x / size) * Math.PI * 2;
+      const nx = Math.cos(u * 4 + Math.sin(v * 3)) * 0.18 + Math.cos(u * 9 - v * 7) * 0.09;
+      const ny = Math.sin(v * 5 + Math.cos(u * 3)) * 0.18 + Math.sin(v * 8 + u * 6) * 0.09;
+      const nz = 1.0;
+      const len = Math.hypot(nx, ny, nz);
+      const p4 = (y * size + x) * 4;
+      bytes[p4] = Math.round(((nx / len) * 0.5 + 0.5) * 255);
+      bytes[p4 + 1] = Math.round(((ny / len) * 0.5 + 0.5) * 255);
+      bytes[p4 + 2] = Math.round(((nz / len) * 0.5 + 0.5) * 255);
+      bytes[p4 + 3] = 255;
+    }
+  }
+  const tex = new THREE.DataTexture(bytes, size, size, THREE.RGBAFormat);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(5, 4);
+  tex.needsUpdate = true;
+  cachedWaterNormalTex = tex;
+  return tex;
 }
 
 function buildFlatGroundPolygon(
@@ -20,7 +138,6 @@ function buildFlatGroundPolygon(
     new THREE.BoxGeometry(bounds.width, thickness, bounds.depth),
     material,
   );
-  // Apply world-space metre UVs to top/bottom faces of BoxGeometry
   const uv = mesh.geometry.getAttribute('uv');
   const pos = mesh.geometry.getAttribute('position');
   const cx = (bounds.minX + bounds.maxX) * 0.5;
@@ -54,8 +171,7 @@ function buildPergola(
   const timberMat = materials.getMaterial(el.materialId ?? 'timber-spotted-gum', { worldSpaceUv: false });
   const bracketMat = materials.getMaterial('metal-monument-matte', { worldSpaceUv: false });
 
-  // Outer corner posts (on North patio edge; South side attaches cleanly to house fascia)
-  const postSize = 0.13;
+  const postSize = 0.135;
   for (const px of [bounds.minX + 0.12, (bounds.minX + bounds.maxX) * 0.5, bounds.maxX - 0.12]) {
     const post = new THREE.Mesh(new THREE.BoxGeometry(postSize, height, postSize), timberMat);
     post.position.set(px, height * 0.5 + 0.1, bounds.minZ + 0.14);
@@ -68,26 +184,24 @@ function buildPergola(
     group.add(stirrup);
   }
 
-  // Perimeter beams
-  const beamH = 0.18;
-  const frontBeam = new THREE.Mesh(new THREE.BoxGeometry(bounds.width, beamH, 0.1), timberMat);
+  const beamH = 0.19;
+  const frontBeam = new THREE.Mesh(new THREE.BoxGeometry(bounds.width, beamH, 0.11), timberMat);
   frontBeam.position.set((bounds.minX + bounds.maxX) * 0.5, height + 0.1, bounds.minZ + 0.14);
   frontBeam.castShadow = true;
   group.add(frontBeam);
 
   for (const sideX of [bounds.minX + 0.08, bounds.maxX - 0.08]) {
-    const sideBeam = new THREE.Mesh(new THREE.BoxGeometry(0.09, beamH, bounds.depth), timberMat);
+    const sideBeam = new THREE.Mesh(new THREE.BoxGeometry(0.095, beamH, bounds.depth), timberMat);
     sideBeam.position.set(sideX, height + 0.1, (bounds.minZ + bounds.maxZ) * 0.5);
     sideBeam.castShadow = true;
     group.add(sideBeam);
   }
 
-  // Architectural sun-shading timber louvers (cast iconic striped Australian alfresco shadows!)
-  const louverCount = Math.max(8, Math.floor(bounds.depth / 0.28));
+  const louverCount = Math.max(8, Math.floor(bounds.depth / 0.27));
   for (let i = 0; i < louverCount; i++) {
     const z = bounds.minZ + 0.25 + (i / louverCount) * (bounds.depth - 0.4);
     const batten = new THREE.Mesh(
-      new THREE.BoxGeometry(bounds.width - 0.16, 0.09, 0.045),
+      new THREE.BoxGeometry(bounds.width - 0.16, 0.095, 0.045),
       timberMat,
     );
     batten.position.set((bounds.minX + bounds.maxX) * 0.5, height + 0.18, z);
@@ -116,9 +230,8 @@ function buildSwimmingPool(
   const glassMat = materials.getMaterial('glass-architectural-clear');
   const spigotMat = materials.getMaterial('metal-brushed-nickel', { worldSpaceUv: false });
 
-  // Travertine coping border (4 edges around water)
-  const copingW = 0.38;
-  const copingH = 0.08;
+  const copingW = 0.4;
+  const copingH = 0.085;
   const northCoping = new THREE.Mesh(
     new THREE.BoxGeometry(bounds.width + copingW * 2, copingH, copingW),
     copingMat,
@@ -133,35 +246,41 @@ function buildSwimmingPool(
   westCoping.position.set(bounds.minX - copingW * 0.5, copingH * 0.5, cz);
   const eastCoping = new THREE.Mesh(new THREE.BoxGeometry(copingW, copingH, bounds.depth), copingMat);
   eastCoping.position.set(bounds.maxX + copingW * 0.5, copingH * 0.5, cz);
+  for (const c of [northCoping, southCoping, westCoping, eastCoping]) {
+    c.receiveShadow = true;
+    c.castShadow = true;
+  }
   group.add(northCoping, southCoping, westCoping, eastCoping);
 
-  // Turquoise sunlit Australian pool basin + shimmering physical water surface
   const basinMat = new THREE.MeshStandardMaterial({
-    color: 0x1b7c96,
-    roughness: 0.35,
+    color: 0x166d86,
+    roughness: 0.28,
     metalness: 0.05,
   });
   const basin = new THREE.Mesh(new THREE.BoxGeometry(bounds.width, 0.04, bounds.depth), basinMat);
-  basin.position.set(cx, -0.18, cz);
+  basin.position.set(cx, -0.22, cz);
   basin.receiveShadow = true;
   group.add(basin);
 
   const waterMat = new THREE.MeshPhysicalMaterial({
-    color: 0x3ec6df,
-    roughness: 0.06,
-    metalness: 0.05,
-    transmission: 0.72,
+    color: 0x4ad2ea,
+    normalMap: getPoolWaterNormalTexture(),
+    normalScale: new THREE.Vector2(0.35, 0.35),
+    roughness: 0.04,
+    metalness: 0.04,
+    transmission: 0.78,
     transparent: true,
-    opacity: 0.82,
+    opacity: 0.85,
     ior: 1.333,
-    envMapIntensity: 1.65,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.03,
+    envMapIntensity: 2.2,
   });
   const water = new THREE.Mesh(new THREE.PlaneGeometry(bounds.width, bounds.depth), waterMat);
   water.rotation.x = -Math.PI * 0.5;
-  water.position.set(cx, 0.04, cz);
+  water.position.set(cx, 0.045, cz);
   group.add(water);
 
-  // Australian compliant frameless glass pool fence along West & South house-facing edges
   const fenceH = 1.2;
   const southGlass = new THREE.Mesh(
     new THREE.BoxGeometry(bounds.width + 0.6, fenceH, 0.016),
@@ -175,7 +294,6 @@ function buildSwimmingPool(
   westGlass.position.set(bounds.minX - 0.45, fenceH * 0.5 + 0.06, cz);
   group.add(southGlass, westGlass);
 
-  // Stainless steel mini-post spigots
   for (let sx = bounds.minX; sx <= bounds.maxX; sx += 1.35) {
     const spigot = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.16, 0.045), spigotMat);
     spigot.position.set(sx, 0.12, bounds.maxZ + 0.45);
@@ -195,10 +313,9 @@ function buildBoundaryFence(
   if (!pts || pts.length < 2) return group;
 
   const h = el.height ?? 1.85;
-  const panelMat = materials.getMaterial(el.materialId ?? 'metal-monument-matte', { worldSpaceUv: true });
+  const panelMat = materials.getMaterial('roof-colorbond-monument', { worldSpaceUv: true });
   const postMat = materials.getMaterial('metal-monument-matte', { worldSpaceUv: false });
 
-  // Open polyline along pts[0]->pts[1]->...->pts[n-1] (leaves front street frontage open!)
   for (let i = 0; i < pts.length - 1; i++) {
     const a = pts[i]!;
     const b = pts[i + 1]!;
@@ -214,6 +331,12 @@ function buildBoundaryFence(
     panel.receiveShadow = true;
     group.add(panel);
 
+    // Top capping rail
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(len, 0.055, 0.075), postMat);
+    rail.position.set((a.x + b.x) * 0.5, h + 0.02, (a.z + b.z) * 0.5);
+    rail.rotation.y = yaw;
+    group.add(rail);
+
     const postCount = Math.max(2, Math.ceil(len / 2.4));
     for (let p = 0; p <= postCount; p++) {
       const t = p / postCount;
@@ -227,7 +350,11 @@ function buildBoundaryFence(
   return group;
 }
 
-function buildEucalyptusTreeLod(
+/**
+ * Builds an authentic multi-branching Australian Ghost Gum / Eucalyptus tree using curved
+ * CatmullRom trunk/bough tubes + alpha-tested botanical eucalyptus leaf-sprig cards!
+ */
+function buildBotanicalEucalyptusTree(
   el: LandscapeElementData,
   enableLod: boolean,
 ): THREE.Object3D {
@@ -235,147 +362,174 @@ function buildEucalyptusTreeLod(
   const scale = el.scale ?? 1.0;
 
   const barkMat = new THREE.MeshStandardMaterial({
-    color: 0xcbc4b8, // Smooth pale grey-cream Australian Ghost/Lemon-Scented Gum bark
-    roughness: 0.78,
+    color: 0xd4cdc0,
+    roughness: 0.82,
   });
-  const canopyMat = new THREE.MeshStandardMaterial({
-    color: 0x5c7a58, // Authentic silvery-sage Australian eucalyptus foliage
-    roughness: 0.85,
+  const leafTex = getEucalyptusLeafClusterTexture();
+  const leafMat = new THREE.MeshStandardMaterial({
+    map: leafTex,
+    alphaTest: 0.4,
+    side: THREE.DoubleSide,
+    roughness: 0.72,
+    metalness: 0.0,
   });
 
-  const createTreeDetail = (segments: number, canopyClusters: number): THREE.Group => {
+  const createTreeDetail = (foliageCards: number): THREE.Group => {
     const g = new THREE.Group();
-    const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.13 * scale, 0.22 * scale, 3.4 * scale, segments),
-      barkMat,
-    );
-    trunk.position.y = 1.7 * scale;
-    trunk.castShadow = true;
-    trunk.receiveShadow = true;
-    g.add(trunk);
 
-    const offsets: Array<[number, number, number, number]> = [
-      [0, 3.8, 0, 1.35],
-      [-0.85, 3.35, 0.45, 1.0],
-      [0.82, 3.45, -0.4, 1.05],
-      [0.2, 4.45, 0.35, 0.95],
+    // Organic curved main trunk + 3 diverging boughs
+    const branches: Array<{ pts: Array<[number, number, number]>; r: number }> = [
+      {
+        pts: [
+          [0, 0, 0],
+          [0.08, 1.3, -0.05],
+          [-0.06, 2.6, 0.08],
+          [0.12, 3.85, 0.04],
+        ],
+        r: 0.14,
+      },
+      {
+        pts: [
+          [0.02, 2.1, 0.02],
+          [-0.55, 2.9, 0.35],
+          [-1.05, 3.55, 0.58],
+        ],
+        r: 0.075,
+      },
+      {
+        pts: [
+          [-0.02, 2.35, 0.05],
+          [0.62, 3.1, -0.38],
+          [1.12, 3.7, -0.62],
+        ],
+        r: 0.072,
+      },
+      {
+        pts: [
+          [0.05, 2.75, 0.04],
+          [0.15, 3.5, 0.65],
+          [0.25, 4.15, 1.02],
+        ],
+        r: 0.065,
+      },
     ];
-    for (let i = 0; i < Math.min(canopyClusters, offsets.length); i++) {
-      const [ox, oy, oz, rad] = offsets[i]!;
-      const crown = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(rad * scale, segments > 6 ? 1 : 0),
-        canopyMat,
+
+    for (const br of branches) {
+      const curve = new THREE.CatmullRomCurve3(
+        br.pts.map(([x, y, z]) => new THREE.Vector3(x * scale, y * scale, z * scale)),
       );
-      crown.scale.set(1.15, 0.78, 1.15);
-      crown.position.set(ox * scale, oy * scale, oz * scale);
-      crown.castShadow = true;
-      crown.receiveShadow = true;
-      g.add(crown);
+      const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 12, br.r * scale, 8, false), barkMat);
+      tube.castShadow = true;
+      tube.receiveShadow = true;
+      g.add(tube);
     }
+
+    // Multi-layered crossed eucalyptus leaf-sprig cards around the bough tips
+    const cardGeo = new THREE.PlaneGeometry(1.15 * scale, 1.15 * scale);
+    const crownCenters: Array<[number, number, number, number]> = [
+      [0.1, 4.1, 0.05, 1.1],
+      [-1.05, 3.65, 0.58, 0.95],
+      [1.12, 3.8, -0.6, 0.95],
+      [0.25, 4.25, 0.98, 0.88],
+      [-0.35, 4.55, -0.35, 0.85],
+    ];
+
+    for (let i = 0; i < foliageCards; i++) {
+      const [cx, cy, cz, spread] = crownCenters[i % crownCenters.length]!;
+      const goldenAngle = i * 2.39996;
+      const rad = ((i % 7) / 7) * spread * 0.72;
+      const ox = Math.cos(goldenAngle) * rad;
+      const oz = Math.sin(goldenAngle) * rad;
+      const oy = (((i * 3) % 5) / 5 - 0.45) * spread * 0.65;
+
+      const card = new THREE.Mesh(cardGeo, leafMat);
+      card.position.set((cx + ox) * scale, (cy + oy) * scale, (cz + oz) * scale);
+      card.rotation.set(
+        ((i * 5) % 7) * 0.22 - 0.55,
+        goldenAngle,
+        ((i * 3) % 5) * 0.18 - 0.35,
+      );
+      card.castShadow = true;
+      card.receiveShadow = true;
+      g.add(card);
+    }
+
     return g;
   };
 
   if (!enableLod) {
-    const high = createTreeDetail(8, 4);
-    high.position.set(pos.x, 0, pos.z);
-    high.rotation.y = el.rotationY ?? 0;
-    return high;
+    const full = createTreeDetail(50);
+    full.position.set(pos.x, 0, pos.z);
+    full.rotation.y = el.rotationY ?? 0;
+    return full;
   }
 
   const lod = new THREE.LOD();
-  lod.addLevel(createTreeDetail(10, 4), 0);
-  lod.addLevel(createTreeDetail(5, 2), 26);
+  lod.addLevel(createTreeDetail(52), 0);
+  lod.addLevel(createTreeDetail(24), 28);
   lod.position.set(pos.x, 0, pos.z);
   lod.rotation.y = el.rotationY ?? 0;
   return lod;
 }
 
-/**
- * Generates an InstancedMesh of native Australian grass tufts & Kangaroo Paw shrubs
- * across open lawn zones (strictly 1 GPU draw call for hundreds of tufts!).
- */
-function buildInstancedLawnTufts(
-  lawnBounds: { minX: number; maxX: number; minZ: number; maxZ: number },
-  excludedPolygons: ReadonlyArray<readonly Point2D[]>,
+function buildGardenFlora(
   shrubElements: readonly LandscapeElementData[],
-  densityMultiplier: number,
+  assetManager?: AssetManager,
+  abortSignal?: AbortSignal,
 ): THREE.Group {
   const group = new THREE.Group();
-  group.name = 'InstancedFloraGroup';
+  group.name = 'NativeFloraGroup';
+  if (shrubElements.length === 0) return group;
 
-  const maxCount = Math.max(24, Math.floor(220 * densityMultiplier));
-  const tuftGeo = new THREE.ConeGeometry(0.11, 0.24, 5);
-  tuftGeo.translate(0, 0.12, 0);
-  const tuftMat = new THREE.MeshStandardMaterial({
-    color: 0x54783d,
-    roughness: 0.88,
+  const leafMat = new THREE.MeshStandardMaterial({
+    map: getEucalyptusLeafClusterTexture(),
+    alphaTest: 0.4,
+    side: THREE.DoubleSide,
+    roughness: 0.78,
   });
 
-  const validTransforms: THREE.Matrix4[] = [];
-  const dummy = new THREE.Object3D();
+  for (const shrub of shrubElements) {
+    const holder = new THREE.Group();
+    const pos = shrub.position ?? { x: 0, z: 0 };
+    const sc = shrub.scale ?? 1;
+    holder.position.set(pos.x, 0, pos.z);
+    holder.rotation.y = shrub.rotationY ?? 0;
 
-  // Deterministic Halton-like scatter across yard, skipping house footprint, driveway, footpath & pool
-  for (let i = 0; i < maxCount * 2 && validTransforms.length < maxCount; i++) {
-    const hx = ((i * 0.61803398875) % 1);
-    const hz = ((i * 0.38196601125 + 0.17) % 1);
-    const px = lawnBounds.minX + 0.8 + hx * (lawnBounds.maxX - lawnBounds.minX - 1.6);
-    const pz = lawnBounds.minZ + 0.8 + hz * (lawnBounds.maxZ - lawnBounds.minZ - 1.6);
-    const pt = { x: px, z: pz };
-
-    const insideExcluded = excludedPolygons.some((poly) => pointInPolygon(pt, poly));
-    if (insideExcluded) continue;
-
-    const s = 0.65 + ((i * 17) % 7) * 0.1;
-    dummy.position.set(px, 0, pz);
-    dummy.rotation.set(0, (i * 1.7) % (Math.PI * 2), 0);
-    dummy.scale.set(s, s * 0.7, s);
-    dummy.updateMatrix();
-    validTransforms.push(dummy.matrix.clone());
-  }
-
-  if (validTransforms.length > 0) {
-    const instancedTufts = new THREE.InstancedMesh(tuftGeo, tuftMat, validTransforms.length);
-    instancedTufts.name = 'InstancedLawnTufts';
-    instancedTufts.frustumCulled = true;
-    instancedTufts.receiveShadow = true;
-    for (let idx = 0; idx < validTransforms.length; idx++) {
-      instancedTufts.setMatrixAt(idx, validTransforms[idx]!);
+    // Immediate crossed botanical foliage cards fallback (zero ugly spheres!)
+    const fallback = new THREE.Group();
+    const cardGeo = new THREE.PlaneGeometry(0.75 * sc, 0.65 * sc);
+    for (let k = 0; k < 7; k++) {
+      const card = new THREE.Mesh(cardGeo, leafMat);
+      card.position.set((k - 3) * 0.38, 0.32 * sc, ((k % 2) - 0.5) * 0.22);
+      card.rotation.y = k * 0.9;
+      card.rotation.x = 0.2;
+      card.castShadow = true;
+      fallback.add(card);
     }
-    instancedTufts.instanceMatrix.needsUpdate = true;
-    group.add(instancedTufts);
-  }
+    holder.add(fallback);
+    group.add(holder);
 
-  // Instanced native Lomandra & Kangaroo Paw border shrubs
-  if (shrubElements.length > 0) {
-    const clustersPerShrub = 5;
-    const totalShrubClusters = shrubElements.length * clustersPerShrub;
-    const shrubGeo = new THREE.DodecahedronGeometry(0.36, 0);
-    shrubGeo.translate(0, 0.26, 0);
-    const shrubMat = new THREE.MeshStandardMaterial({
-      color: 0x4b6e3c,
-      roughness: 0.85,
-    });
-    const instancedShrubs = new THREE.InstancedMesh(shrubGeo, shrubMat, totalShrubClusters);
-    instancedShrubs.name = 'InstancedNativeShrubs';
-    instancedShrubs.castShadow = true;
-    instancedShrubs.receiveShadow = true;
-
-    let cursor = 0;
-    for (const shrub of shrubElements) {
-      const basePos = shrub.position ?? { x: 0, z: 0 };
-      const sc = shrub.scale ?? 1;
-      for (let k = 0; k < clustersPerShrub; k++) {
-        const offsetX = (k - (clustersPerShrub - 1) * 0.5) * 0.58;
-        const offsetZ = ((k % 2) - 0.5) * 0.25;
-        dummy.position.set(basePos.x + offsetX, 0, basePos.z + offsetZ);
-        dummy.rotation.set(0, k * 1.1 + shrub.rotationY, 0);
-        dummy.scale.set(sc * (0.85 + (k % 3) * 0.15), sc * 0.8, sc);
-        dummy.updateMatrix();
-        instancedShrubs.setMatrixAt(cursor++, dummy.matrix);
-      }
+    // Upgrade asynchronously with real CC0 botanical fern_02.glb & shrub_03.glb!
+    if (assetManager) {
+      Promise.all([
+        assetManager.loadGlbModel('/models/fern_02.glb', abortSignal),
+        assetManager.loadGlbModel('/models/shrub_03.glb', abortSignal),
+      ])
+        .then(([fernGlb, shrubGlb]) => {
+          if (abortSignal?.aborted || !holder.parent) return;
+          holder.remove(fallback);
+          cardGeo.dispose();
+          for (let k = 0; k < 5; k++) {
+            const clone = (k % 2 === 0 ? fernGlb : shrubGlb).clone(true);
+            const sFactor = k % 2 === 0 ? 0.9 * sc : 2.1 * sc;
+            clone.scale.setScalar(sFactor);
+            clone.position.set((k - 2) * 0.55, 0, ((k % 2) - 0.5) * 0.24);
+            clone.rotation.y = k * 1.3;
+            holder.add(clone);
+          }
+        })
+        .catch(() => {});
     }
-    instancedShrubs.instanceMatrix.needsUpdate = true;
-    group.add(instancedShrubs);
   }
 
   return group;
@@ -385,13 +539,14 @@ export function generateLandscape3D(
   sceneData: SceneData,
   materials: MaterialSystem,
   quality: LandscapeQualityOptions = { vegetationDensityMultiplier: 1.0, enableLod: true },
+  assetManager?: AssetManager,
+  abortSignal?: AbortSignal,
 ): THREE.Group {
   const root = new THREE.Group();
   root.name = 'LandscapeRoot';
 
-  // Suburban Australian neighbourhood ground horizon disc (blends cleanly with atmospheric fog)
   const surroundMat = new THREE.MeshStandardMaterial({
-    color: 0xaab09e,
+    color: 0x9aa48c,
     roughness: 0.96,
   });
   const surroundPlane = new THREE.Mesh(new THREE.CircleGeometry(94, 48), surroundMat);
@@ -400,23 +555,19 @@ export function generateLandscape3D(
   surroundPlane.receiveShadow = true;
   root.add(surroundPlane);
 
-  // Street frontage road & nature strip at +Z (South street side)
-  const roadMat = new THREE.MeshStandardMaterial({ color: 0x4b4f54, roughness: 0.88 });
+  const roadMat = new THREE.MeshStandardMaterial({ color: 0x464a4f, roughness: 0.88 });
   const road = new THREE.Mesh(new THREE.PlaneGeometry(90, 7.0), roadMat);
   road.rotation.x = -Math.PI * 0.5;
   road.position.set(0, -0.02, 18.5);
   road.receiveShadow = true;
   root.add(road);
 
-  const excludedForGrass: Array<readonly Point2D[]> = sceneData.rooms.map((r: RoomData) => r.polygon);
-  let lawnBounds = { minX: -11, maxX: 11, minZ: -15, maxZ: 15 };
   const shrubElements: LandscapeElementData[] = [];
 
   for (const el of sceneData.landscape) {
     switch (el.type) {
       case 'lawn': {
         if (el.polygon) {
-          lawnBounds = polygonBounds(el.polygon);
           const mesh = buildFlatGroundPolygon(
             el.polygon,
             0.0,
@@ -433,7 +584,6 @@ export function generateLandscape3D(
       case 'driveway':
       case 'footpath': {
         if (el.polygon) {
-          excludedForGrass.push(el.polygon);
           const yTop = el.type === 'driveway' ? 0.025 : 0.03;
           const mesh = buildFlatGroundPolygon(
             el.polygon,
@@ -457,7 +607,6 @@ export function generateLandscape3D(
         break;
       }
       case 'swimming_pool': {
-        if (el.polygon) excludedForGrass.push(el.polygon);
         root.add(buildSwimmingPool(el, materials));
         break;
       }
@@ -466,7 +615,7 @@ export function generateLandscape3D(
         break;
       }
       case 'tree_eucalyptus': {
-        root.add(buildEucalyptusTreeLod(el, quality.enableLod));
+        root.add(buildBotanicalEucalyptusTree(el, quality.enableLod));
         break;
       }
       case 'shrub_native': {
@@ -478,14 +627,7 @@ export function generateLandscape3D(
     }
   }
 
-  root.add(
-    buildInstancedLawnTufts(
-      lawnBounds,
-      excludedForGrass,
-      shrubElements,
-      quality.vegetationDensityMultiplier,
-    ),
-  );
+  root.add(buildGardenFlora(shrubElements, assetManager, abortSignal));
 
   return root;
 }

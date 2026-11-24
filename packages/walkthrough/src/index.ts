@@ -365,8 +365,8 @@ export class WalkthroughController {
         target: { x: 0.2, y: 1.4, z: 4.0 },
       },
       living_room: {
-        pos: { x: -2.2, y: 1.82, z: -2.2 },
-        yaw: 0.35, // Looks across Living Room & out through Alfresco Glass Doors to Backyard!
+        pos: { x: -5.55, y: 1.68, z: -5.05 },
+        yaw: -2.32, // Interior photography angle showcasing sculpted Sofa, Coffee Table, Console & Kitchen Island!
         orbitPos: { x: -11.5, y: 9.0, z: -13.5 },
         target: { x: -3.5, y: 1.2, z: -3.8 },
       },

@@ -11,6 +11,11 @@ import { deepClone, type Point2D } from '@kujiale/shared';
 import type { SceneData } from '@kujiale/scene-schema';
 import { WalkthroughController, type CameraNavigationMode } from '@kujiale/walkthrough';
 import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 
 export type QualityProfileName = 'low' | 'medium' | 'high' | 'ultra';
 
@@ -19,6 +24,7 @@ export interface QualityProfileSpec {
   maxPixelRatio: number;
   shadowMapSize: number;
   shadowsEnabled: boolean;
+  ambientOcclusionEnabled: boolean;
   textureTier: TextureQualityTier;
   vegetationDensity: number;
   antialias: boolean;
@@ -30,6 +36,7 @@ export const QUALITY_PROFILES: Record<QualityProfileName, QualityProfileSpec> = 
     maxPixelRatio: 1.0,
     shadowMapSize: 1024,
     shadowsEnabled: false,
+    ambientOcclusionEnabled: false,
     textureTier: 'low',
     vegetationDensity: 0.28,
     antialias: false,
@@ -37,17 +44,19 @@ export const QUALITY_PROFILES: Record<QualityProfileName, QualityProfileSpec> = 
   medium: {
     name: 'medium',
     maxPixelRatio: 1.5,
-    shadowMapSize: 1536,
+    shadowMapSize: 2048,
     shadowsEnabled: true,
+    ambientOcclusionEnabled: false,
     textureTier: 'medium',
-    vegetationDensity: 0.6,
+    vegetationDensity: 0.65,
     antialias: true,
   },
   high: {
     name: 'high',
     maxPixelRatio: 2.0,
-    shadowMapSize: 2048,
+    shadowMapSize: 3072,
     shadowsEnabled: true,
+    ambientOcclusionEnabled: true,
     textureTier: 'high',
     vegetationDensity: 1.0,
     antialias: true,
@@ -57,6 +66,7 @@ export const QUALITY_PROFILES: Record<QualityProfileName, QualityProfileSpec> = 
     maxPixelRatio: 2.5,
     shadowMapSize: 4096,
     shadowsEnabled: true,
+    ambientOcclusionEnabled: true,
     textureTier: 'ultra',
     vegetationDensity: 1.0,
     antialias: true,
@@ -158,6 +168,9 @@ export class HouseSceneEngine {
 
   private readonly container: HTMLElement | null;
   private readonly rendererAdapter: RendererAdapter | null;
+  private composer: EffectComposer | null = null;
+  private gtaoPass: GTAOPass | null = null;
+  private smaaPass: SMAAPass | null = null;
   private readonly callbacks: HouseSceneEngineCallbacks;
 
   private qualityProfile: QualityProfileSpec;
@@ -221,6 +234,7 @@ export class HouseSceneEngine {
       const h = Math.max(240, rect.height || 720);
       this.rendererAdapter.setSize(w, h, this.qualityProfile.maxPixelRatio);
       this.walkthrough = new WalkthroughController(w / h, this.rendererAdapter.domElement);
+      this.setupPostProcessing(w, h);
     } else {
       // Headless unit test mode
       this.rendererAdapter = null;
@@ -293,7 +307,7 @@ export class HouseSceneEngine {
         this.selectionBoxHelper.update();
       }
 
-      this.rendererAdapter?.render(this.scene, this.walkthrough.camera);
+      this.renderFrame();
 
       this.frameCounter++;
       const elapsedWindow = now - this.fpsWindowStart;
@@ -326,9 +340,76 @@ export class HouseSceneEngine {
     }
   }
 
+  private setupPostProcessing(width: number, height: number): void {
+    if (!this.rendererAdapter) return;
+    this.composer?.dispose();
+    this.composer = null;
+    this.gtaoPass = null;
+    this.smaaPass = null;
+
+    if (!this.qualityProfile.ambientOcclusionEnabled) return;
+
+    const renderer = this.rendererAdapter.rawRenderer;
+    const dpr = renderer.getPixelRatio();
+    const rt = new THREE.WebGLRenderTarget(
+      Math.max(1, Math.floor(width * dpr)),
+      Math.max(1, Math.floor(height * dpr)),
+      { type: THREE.HalfFloatType },
+    );
+
+    const composer = new EffectComposer(renderer, rt);
+    composer.setPixelRatio(dpr);
+    composer.setSize(width, height);
+
+    const renderPass = new RenderPass(this.scene, this.walkthrough.camera);
+    composer.addPass(renderPass);
+
+    const gtao = new GTAOPass(this.scene, this.walkthrough.camera, width, height);
+    gtao.output = GTAOPass.OUTPUT.Default;
+    gtao.blendIntensity = 0.85;
+    gtao.updateGtaoMaterial({
+      radius: 0.38,
+      distanceExponent: 1.4,
+      thickness: 0.8,
+      scale: 1.0,
+      samples: this.qualityProfile.name === 'ultra' ? 24 : 16,
+      distanceFallOff: 1.0,
+      screenSpaceRadius: false,
+    });
+    this.gtaoPass = gtao;
+    composer.addPass(gtao);
+
+    const outputPass = new OutputPass();
+    composer.addPass(outputPass);
+
+    const smaa = new SMAAPass(width * dpr, height * dpr);
+    this.smaaPass = smaa;
+    composer.addPass(smaa);
+
+    this.composer = composer;
+  }
+
+  private renderFrame(): void {
+    if (!this.rendererAdapter) return;
+    if (this.composer && this.qualityProfile.ambientOcclusionEnabled) {
+      this.composer.render();
+    } else {
+      this.rendererAdapter.render(this.scene, this.walkthrough.camera);
+    }
+  }
+
   public resize(width: number, height: number): void {
-    this.walkthrough.setAspect(width / height);
-    this.rendererAdapter?.setSize(width, height, this.qualityProfile.maxPixelRatio);
+    const w = Math.max(1, width);
+    const h = Math.max(1, height);
+    this.walkthrough.setAspect(w / h);
+    this.rendererAdapter?.setSize(w, h, this.qualityProfile.maxPixelRatio);
+    if (this.composer && this.rendererAdapter) {
+      const dpr = this.rendererAdapter.rawRenderer.getPixelRatio();
+      this.composer.setPixelRatio(dpr);
+      this.composer.setSize(w, h);
+      this.gtaoPass?.setSize(w, h);
+      this.smaaPass?.setSize(w * dpr, h * dpr);
+    }
   }
 
   public setQualityProfile(profileName: QualityProfileName): void {
@@ -340,11 +421,10 @@ export class HouseSceneEngine {
     );
     if (this.container && this.rendererAdapter) {
       const rect = this.container.getBoundingClientRect();
-      this.rendererAdapter.setSize(
-        rect.width || 1280,
-        rect.height || 720,
-        this.qualityProfile.maxPixelRatio,
-      );
+      const w = Math.max(320, rect.width || 1280);
+      const h = Math.max(240, rect.height || 720);
+      this.rendererAdapter.setSize(w, h, this.qualityProfile.maxPixelRatio);
+      this.setupPostProcessing(w, h);
     }
     if (this.currentSceneData) {
       this.loadScene(this.currentSceneData);
@@ -411,11 +491,17 @@ export class HouseSceneEngine {
     this.houseHierarchy = generateHouse3D(sceneData, this.materials);
     this.scene.add(this.houseHierarchy.root);
 
-    // 2. Build Australian Landscape
-    this.landscapeRoot = generateLandscape3D(sceneData, this.materials, {
-      vegetationDensityMultiplier: this.qualityProfile.vegetationDensity,
-      enableLod: this.qualityProfile.name !== 'ultra',
-    });
+    // 2. Build Australian Landscape (with CC0 botanical flora GLB support)
+    this.landscapeRoot = generateLandscape3D(
+      sceneData,
+      this.materials,
+      {
+        vegetationDensityMultiplier: this.qualityProfile.vegetationDensity,
+        enableLod: this.qualityProfile.name !== 'ultra',
+      },
+      this.assetManager,
+      signal,
+    );
     this.scene.add(this.landscapeRoot);
 
     // 3. Build Furniture Items
@@ -643,7 +729,7 @@ export class HouseSceneEngine {
     if (!this.rendererAdapter) return null;
     const prevHelperVis = this.selectionBoxHelper?.visible ?? false;
     if (this.selectionBoxHelper) this.selectionBoxHelper.visible = false;
-    this.rendererAdapter.render(this.scene, this.walkthrough.camera);
+    this.renderFrame();
     const dataUrl = this.rendererAdapter.domElement.toDataURL('image/png');
     if (this.selectionBoxHelper) this.selectionBoxHelper.visible = prevHelperVis;
     return dataUrl;
@@ -654,6 +740,7 @@ export class HouseSceneEngine {
     this.isDisposed = true;
     this.stopRenderLoop();
     this.loadAbortController?.abort();
+    this.composer?.dispose();
 
     if (this.rendererAdapter) {
       const canvas = this.rendererAdapter.domElement;

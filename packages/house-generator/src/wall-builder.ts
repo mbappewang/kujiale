@@ -492,5 +492,47 @@ export function buildWallGroup(
     group.add(trimMesh);
   }
 
+  // Architectural Skirting Boards (92mm) & Ceiling Cornices (50mm) along interior room faces
+  const skirtingMat = materials.getMaterial('paint-crisp-white', { worldSpaceUv: false });
+  const dirVec = wallDirection(wall.start, wall.end);
+  const wallYaw = -Math.atan2(dirVec.z, dirVec.x);
+
+  const addTrimRun = (u0: number, u1: number, sideSign: 1 | -1) => {
+    const runLen = u1 - u0;
+    if (runLen < 0.14) return;
+    const uMid = (u0 + u1) * 0.5;
+    const centerLinePt = lerpPoint2D(wall.start, wall.end, uMid / wallLen);
+    const offsetDist = wall.thickness * 0.5 + 0.009;
+    const tx = centerLinePt.x + leftN.x * offsetDist * sideSign;
+    const tz = centerLinePt.z + leftN.z * offsetDist * sideSign;
+
+    const skirt = new THREE.Mesh(new THREE.BoxGeometry(runLen, 0.092, 0.018), skirtingMat);
+    skirt.position.set(tx, baseElevation + 0.046, tz);
+    skirt.rotation.y = wallYaw;
+    skirt.castShadow = true;
+    skirt.receiveShadow = true;
+    group.add(skirt);
+
+    const cornice = new THREE.Mesh(new THREE.BoxGeometry(runLen, 0.048, 0.036), skirtingMat);
+    cornice.position.set(tx, yCeil - 0.024, tz);
+    cornice.rotation.y = wallYaw;
+    cornice.receiveShadow = true;
+    group.add(cornice);
+  };
+
+  let skirtCursor = 0;
+  const doorOpenings = openings.filter((op) => op.kind === 'door');
+  for (const dOp of doorOpenings) {
+    if (dOp.uStart > skirtCursor + 0.05) {
+      if (!leftSideInfo.isExteriorFace) addTrimRun(skirtCursor, dOp.uStart, 1);
+      if (!rightSideInfo.isExteriorFace) addTrimRun(skirtCursor, dOp.uStart, -1);
+    }
+    skirtCursor = dOp.uEnd;
+  }
+  if (skirtCursor < wallLen - 0.05) {
+    if (!leftSideInfo.isExteriorFace) addTrimRun(skirtCursor, wallLen, 1);
+    if (!rightSideInfo.isExteriorFace) addTrimRun(skirtCursor, wallLen, -1);
+  }
+
   return group;
 }

@@ -21,10 +21,10 @@ test.describe('AussieHome 3D — Core E2E & Visual Benchmark Suite', () => {
     await expect(page.getByText(/API Connected/)).toBeVisible();
     await page.screenshot({ path: resolve(BENCHMARK_DIR, '01-dashboard.png') });
 
-    // 2. Launch 3D Studio (Orbit Exterior View)
+    // 2. Launch 3D Studio (Orbit Exterior View — wait for async 1K PBR maps, 32-bit HDRI & CC0 GLBs)
     await page.getByRole('button', { name: /Walk Through Sydney Coastal Demo/i }).click();
     await expect(page).toHaveURL(/\/projects\/.*\/studio/);
-    await page.waitForTimeout(1600); // Allow WebGL2 frames + FPS window (>=750ms) to sample
+    await page.waitForTimeout(2600);
 
     // Verify WebGL canvas exists and rendered non-blank pixels
     const canvasCount = await page.locator('canvas').count();

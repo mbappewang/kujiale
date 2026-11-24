@@ -12,6 +12,7 @@
     "@kujiale/shared": "workspace:*",
     "@kujiale/scene-schema": "workspace:*",
     "@kujiale/materials": "workspace:*",
+    "@kujiale/asset-manager": "workspace:*",
     "three": "^0.174.0"
   },
   "devDependencies": {

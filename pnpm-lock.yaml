@@ -354,6 +354,9 @@ importers:
 
   packages/landscape:
     dependencies:
+      '@kujiale/asset-manager':
+        specifier: workspace:*
+        version: link:../asset-manager
       '@kujiale/materials':
         specifier: workspace:*
         version: link:../materials

@@ -227,38 +227,36 @@ export function buildAustralianHipRoof(
   const positions: number[] = [];
   const uvs: number[] = [];
 
-  const pushTri = (
+  const pushSlopeTri = (
     p0: [number, number, number],
     p1: [number, number, number],
     p2: [number, number, number],
+    alongAxis: 'x' | 'z',
   ) => {
     positions.push(...p0, ...p1, ...p2);
-    // Project roof UVs cleanly along horizontal run & slope height
-    uvs.push(p0[0] + p0[2], p0[1] * 2.2, p1[0] + p1[2], p1[1] * 2.2, p2[0] + p2[2], p2[1] * 2.2);
+    // Orthogonal architectural slope UVs: U runs strictly parallel to eave, V runs strictly up the slope!
+    for (const p of [p0, p1, p2]) {
+      const uCoord = alongAxis === 'x' ? p[0] : p[2];
+      const runCoord = alongAxis === 'x' ? p[2] : p[0];
+      const vCoord = Math.hypot(runCoord, p[1] - yBase);
+      uvs.push(uCoord, vCoord);
+    }
   };
 
   if (ridgeAlongZ) {
-    // North hip triangle (cNE -> cNW -> rA -> outward normal -Z/+Y)
-    pushTri(cNE, cNW, rA);
-    // South hip triangle (cSW -> cSE -> rB -> outward normal +Z/+Y)
-    pushTri(cSW, cSE, rB);
-    // West trapezoid (cNW -> cSW -> rB & cNW -> rB -> rA -> outward normal -X/+Y)
-    pushTri(cNW, cSW, rB);
-    pushTri(cNW, rB, rA);
-    // East trapezoid (cSE -> cNE -> rA & cSE -> rA -> rB -> outward normal +X/+Y)
-    pushTri(cSE, cNE, rA);
-    pushTri(cSE, rA, rB);
+    pushSlopeTri(cNE, cNW, rA, 'x');
+    pushSlopeTri(cSW, cSE, rB, 'x');
+    pushSlopeTri(cNW, cSW, rB, 'z');
+    pushSlopeTri(cNW, rB, rA, 'z');
+    pushSlopeTri(cSE, cNE, rA, 'z');
+    pushSlopeTri(cSE, rA, rB, 'z');
   } else {
-    // West hip triangle
-    pushTri(cNW, cSW, rA);
-    // East hip triangle
-    pushTri(cSE, cNE, rB);
-    // North trapezoid
-    pushTri(cNE, cNW, rA);
-    pushTri(cNE, rA, rB);
-    // South trapezoid
-    pushTri(cSW, cSE, rB);
-    pushTri(cSW, rB, rA);
+    pushSlopeTri(cNW, cSW, rA, 'z');
+    pushSlopeTri(cSE, cNE, rB, 'z');
+    pushSlopeTri(cNE, cNW, rA, 'x');
+    pushSlopeTri(cNE, rA, rB, 'x');
+    pushSlopeTri(cSW, cSE, rB, 'x');
+    pushSlopeTri(cSW, rB, rA, 'x');
   }
 
   const roofGeo = new THREE.BufferGeometry();
@@ -279,6 +277,36 @@ export function buildAustralianHipRoof(
     materialId: property.roofMaterialId,
   };
   roofGroup.add(roofMesh);
+
+  // 3D Architectural Ridge & Hip Capping Flashings
+  const capMat = materials.getMaterial('metal-monument-matte', { worldSpaceUv: false });
+  const addRidgeCapBeam = (a: [number, number, number], b: [number, number, number]) => {
+    const va = new THREE.Vector3(a[0], a[1] + 0.02, a[2]);
+    const vb = new THREE.Vector3(b[0], b[1] + 0.02, b[2]);
+    const len = va.distanceTo(vb);
+    if (len < 0.05) return;
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, len, 6), capMat);
+    cap.position.copy(va).add(vb).multiplyScalar(0.5);
+    cap.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      vb.clone().sub(va).normalize(),
+    );
+    cap.castShadow = true;
+    roofGroup.add(cap);
+  };
+
+  addRidgeCapBeam(rA, rB);
+  if (ridgeAlongZ) {
+    addRidgeCapBeam(cNW, rA);
+    addRidgeCapBeam(cNE, rA);
+    addRidgeCapBeam(cSW, rB);
+    addRidgeCapBeam(cSE, rB);
+  } else {
+    addRidgeCapBeam(cNW, rA);
+    addRidgeCapBeam(cSW, rA);
+    addRidgeCapBeam(cNE, rB);
+    addRidgeCapBeam(cSE, rB);
+  }
 
   // Eaves soffit + Monument fascia gutter perimeter
   const fasciaMat = materials.getMaterial('metal-monument-matte', { worldSpaceUv: false });
