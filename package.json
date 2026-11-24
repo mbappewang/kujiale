@@ -1,0 +1,29 @@
+{
+  "name": "aussie-home-3d",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Australian AI 3D Home Design & Renovation Platform",
+  "packageManager": "pnpm@12.23.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @kujiale/web dev",
+    "dev:api": "uv run --directory services/api uvicorn app.main:app --reload --host 127.0.0.1 --port 8000",
+    "build": "pnpm -r --filter './packages/*' build && pnpm --filter @kujiale/web build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "test:api": "uv run --directory services/api pytest -q",
+    "test:e2e": "playwright test",
+    "test:all": "pnpm test && pnpm test:api"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.51.0",
+    "@types/node": "^22.13.0",
+    "@types/three": "^0.174.0",
+    "three": "^0.174.0",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8",
+    "zod": "^3.24.2"
+  }
+}

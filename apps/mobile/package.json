@@ -1,0 +1,16 @@
+{
+  "name": "@kujiale/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Capacitor iOS WKWebView & Android WebView shell sharing the core AussieHome 3D scene engine",
+  "dependencies": {
+    "@capacitor/cli": "^7.0.1",
+    "@capacitor/core": "^7.0.1"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "cap:sync": "pnpm --filter @kujiale/web build && cap sync"
+  }
+}

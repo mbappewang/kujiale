@@ -1,0 +1,40 @@
+{
+  "name": "@kujiale/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5173",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4173",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@kujiale/asset-manager": "workspace:*",
+    "@kujiale/floorplan-editor": "workspace:*",
+    "@kujiale/furniture": "workspace:*",
+    "@kujiale/house-generator": "workspace:*",
+    "@kujiale/landscape": "workspace:*",
+    "@kujiale/lighting": "workspace:*",
+    "@kujiale/materials": "workspace:*",
+    "@kujiale/scene-schema": "workspace:*",
+    "@kujiale/shared": "workspace:*",
+    "@kujiale/three-engine": "workspace:*",
+    "@kujiale/walkthrough": "workspace:*",
+    "lucide-vue-next": "^0.475.0",
+    "pinia": "^3.0.1",
+    "three": "^0.174.0",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.9",
+    "@types/three": "^0.174.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "tailwindcss": "^4.0.9",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.0",
+    "vue-tsc": "^2.2.4"
+  }
+}

@@ -1,0 +1,23 @@
+[project]
+name = "aussiehome-api"
+version = "0.1.0"
+description = "Australian AI 3D Home Design & Renovation Platform — Modular FastAPI Backend"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.6.0",
+    "sqlalchemy>=2.0.36",
+    "python-multipart>=0.0.18",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4",
+    "httpx>=0.28.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = [".", "../floorplan-ai", "../design-ai", "../render-worker"]
+testpaths = ["tests"]

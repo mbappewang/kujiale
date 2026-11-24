@@ -1,0 +1,24 @@
+{
+  "name": "@kujiale/house-generator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@kujiale/shared": "workspace:*",
+    "@kujiale/scene-schema": "workspace:*",
+    "@kujiale/materials": "workspace:*",
+    "three": "^0.174.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.174.0"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  }
+}
